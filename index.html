@@ -773,16 +773,20 @@ async function showOsdEpg(c){
 function updFavBtn(c){$("pFav").setAttribute("aria-pressed",isFav(c));$("pFav").querySelector(".lbl").textContent=isFav(c)?"En favoritos":"Favorito"}
 function destroyPlayers(){if(hls){hls.destroy();hls=null}if(tsPlayer){try{tsPlayer.pause();tsPlayer.unload();tsPlayer.detachMediaElement();tsPlayer.destroy()}catch(e){}tsPlayer=null}}
 function closePlayer(){
-  destroyPlayers();clearInterval(epgTimer);
-  const v=$("video");try{v.pause();v.removeAttribute("src");v.load();}catch(e){}
-  $("player").hidden=true;
+  try{destroyPlayers()}catch(e){}
+  clearInterval(epgTimer);
+  try{const v=$("video");v.pause();v.src="";v.removeAttribute("src");v.load();}catch(e){}
+  try{$("player").hidden=true;$("player").style.display="none";}catch(e){}
   try{if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document).catch(()=>{})}}catch(e){}
   try{screen.orientation.unlock()}catch(e){}
+  try{$("player").style.display="";}catch(e){}
   render();
 }
 function wake(){const p=$("player");p.classList.remove("idle");clearTimeout(idleT);idleT=setTimeout(()=>p.classList.add("idle"),3500)}
 $("player").addEventListener("pointermove",wake);$("player").addEventListener("touchstart",wake,{passive:true});
-$("pPrev").onclick=()=>tune(playIndex-1);$("pNext").onclick=()=>tune(playIndex+1);$("pClose").onclick=closePlayer;
+$("pPrev").onclick=()=>tune(playIndex-1);$("pNext").onclick=()=>tune(playIndex+1);
+$("pClose").addEventListener("click",function(e){e.stopPropagation();e.preventDefault();closePlayer();},true);
+$("pClose").addEventListener("touchend",function(e){e.stopPropagation();e.preventDefault();closePlayer();},true);
 $("pGuide").onclick=()=>{$("epgPanel").hidden=!$("epgPanel").hidden};
 $("pFav").onclick=()=>{const c=playList[playIndex];toggleFav(c);updFavBtn(c)};
 $("pQual").onchange=e=>{if(hls)hls.currentLevel=+e.target.value};
