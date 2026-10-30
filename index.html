@@ -143,7 +143,8 @@ label.l{font-size:12px;font-weight:700;color:var(--muted);text-transform:upperca
 .epg-item.now{box-shadow:inset 3px 0 0 var(--accent)}
 .epg-item .d{font-size:12px;color:var(--muted);line-height:1.4}
 .bar{display:flex;gap:8px;align-items:center;justify-content:center;padding:12px max(16px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));background:var(--rail);transition:opacity .3s;flex-wrap:wrap}
-.pbtn{border:1px solid var(--line);background:var(--tile);border-radius:9px;padding:8px 14px;font-weight:700;display:flex;gap:6px;align-items:center}
+.pbtn{border:1px solid var(--line);background:var(--tile);border-radius:9px;padding:8px 14px;font-weight:700;display:flex;gap:6px;align-items:center;position:relative;z-index:10}
+#pClose{position:relative;z-index:9999;pointer-events:auto!important}
 .pbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2}
 .err{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:#c9d2e6;pointer-events:none}
 .err b{display:block;font-family:var(--f-display);font-size:22px;color:#fff;margin-bottom:6px}
@@ -270,11 +271,13 @@ if(!playlists||!playlists.length)playlists=[{id:"demo",name:"Lista de ejemplo",t
 let activeId=store.get("ip_active",playlists[0].id);
 let favs=store.get("ip_favs",[]), recents=store.get("ip_recent",[]), resume=store.get("ip_resume",{});
 let proxyAvailable=false, useProxy=false, uaMode="vlc", videoDirect=false;
+let proxyBase=store.get("ip_proxy_base","");
 let live=[], vod=null, series=null, section="live", category="__all", page=1, tvgUrl="";
 let hls=null, tsPlayer=null, playIndex=-1, playList=[], playKind="live", idleT, epgTimer;
 const PAGE=240;
 
-const P=u=>useProxy&&u?"/proxy?url="+encodeURIComponent(u)+(uaMode!=="vlc"?"&ua="+uaMode:""):u;
+const proxyRoot=()=>proxyBase||"";
+const P=u=>useProxy&&u?(proxyRoot()+"/proxy?url=")+encodeURIComponent(u)+(uaMode!=="vlc"?"&ua="+uaMode:""):u;
 const PV=u=>videoDirect?u:P(u);
 const PI=u=>!u?"":/^https:/i.test(u)||location.protocol==="http:"&&!useProxy?u:P(u); // imágenes https van directas
 const active=()=>playlists.find(x=>x.id===activeId)||playlists[0];
@@ -395,7 +398,7 @@ async function pingProxy(){
   for(let i=0;i<4;i++){
     try{
       const ctl=new AbortController();const to=setTimeout(()=>ctl.abort(),8000);
-      const r=await fetch("/proxy?ping=1&t="+Date.now(),{cache:"no-store",signal:ctl.signal});clearTimeout(to);
+      const r=await fetch((proxyBase||"")+"/proxy?ping=1&t="+Date.now(),{cache:"no-store",signal:ctl.signal});clearTimeout(to);
       if(r.ok&&(await r.text()).trim()==="mosaico-ok")return true;
     }catch(e){}
     await new Promise(ok=>setTimeout(ok,1000*(i+1)));
@@ -617,6 +620,8 @@ function renderLists(){
       </form>
     </div>
     <div class="box"><h3>Conexión</h3>
+      <div class="f"><label class="l" for="proxyBaseInp">URL del proxy externo <span class="sub">(opcional, ej: https://mosaico-proxy.onrender.com)</span></label>
+        <input class="field" id="proxyBaseInp" type="url" placeholder="https://… (vacío = usar el Worker)" value="${esc(proxyBase)}"></div>
       <label class="row" style="cursor:pointer"><input type="checkbox" id="proxyChk" ${useProxy?"checked":""} ${proxyAvailable?"":"disabled"}> <span>Conectar a través del proxy</span></label>
       <label class="row" style="cursor:pointer"><input type="checkbox" id="directChk" ${videoDirect?"checked":""} ${useProxy?"":"disabled"}> <span>Video directo (la lista sigue por el proxy)</span></label>
       <div class="f"><label class="l" for="uaSel">Identificarse ante el servidor como</label>
@@ -679,6 +684,15 @@ function renderLists(){
     if(!store.set("ip_lists",playlists)){playlists.pop();return toast("La lista es muy grande para guardarla en este dispositivo. Usá un enlace.")}
     activeId=id;store.set("ip_active",id);setSection("live");loadActive();toast("Lista guardada");
   };
+  const proxyBaseInp=$("proxyBaseInp");
+  proxyBaseInp.onchange=async()=>{
+    proxyBase=proxyBaseInp.value.trim().replace(/\/$/,"");
+    store.set("ip_proxy_base",proxyBase);
+    toast("Comprobando proxy…");
+    proxyAvailable=await pingProxy();
+    if(proxyAvailable){useProxy=store.get("ip_proxy",true);loadActive();toast("Proxy externo conectado ✓");}
+    else toast("No se pudo conectar con ese proxy. Revisá la URL.");
+  };
   $("proxyChk").onchange=e=>{useProxy=e.target.checked;store.set("ip_proxy",useProxy);toast(useProxy?"Proxy activado":"Proxy desactivado");loadActive()};
   $("directChk").onchange=e=>{videoDirect=e.target.checked;store.set("ip_direct",videoDirect);toast(videoDirect?(location.protocol==="https:"?"Video directo: abrí la app con http:// para que funcione":"Video directo activado"):"Video por proxy")};
   const uaSel=$("uaSel");uaSel.value=uaMode;uaSel.onchange=()=>{uaMode=uaSel.value;store.set("ip_ua",uaMode);toast("Guardado. Probá abrir un canal.")};
@@ -688,7 +702,7 @@ function renderLists(){
     out.textContent="Probando "+c.name+"…";const lines=[];
     const alt=c.alt||(/\/live\/.+\.m3u8$/.test(c.url)?c.url.replace(/\.m3u8$/,".ts"):"");
     for(const u of [c.url,alt].filter(Boolean)){
-      try{const r=await fetch("/proxy?url="+encodeURIComponent(u)+"&debug=1"+(uaMode!=="vlc"?"&ua="+uaMode:""));
+      try{const r=await fetch((proxyBase||"")+"/proxy?url="+encodeURIComponent(u)+"&debug=1"+(uaMode!=="vlc"?"&ua="+uaMode:""));
         if(!(r.headers.get("content-type")||"").includes("json")){lines.push(u.split("/").pop()+" → el proxy respondió "+r.status+": "+(await r.text()).slice(0,160));continue}
         const d=await r.json();
         lines.push(`${u.split("/").pop()} → ${d.status} ${d.statusText||""}${d.redirectedTo?"\nRedirige a: "+d.redirectedTo.replace(/\/\/([^/]+)\/.*/,"//$1/…"):""}${d.server?"\nServidor: "+d.server:""}${d.bodyStart?"\nRespuesta: "+d.bodyStart.slice(0,160):""}`)}
@@ -758,7 +772,14 @@ async function showOsdEpg(c){
 }
 function updFavBtn(c){$("pFav").setAttribute("aria-pressed",isFav(c));$("pFav").querySelector(".lbl").textContent=isFav(c)?"En favoritos":"Favorito"}
 function destroyPlayers(){if(hls){hls.destroy();hls=null}if(tsPlayer){try{tsPlayer.pause();tsPlayer.unload();tsPlayer.detachMediaElement();tsPlayer.destroy()}catch(e){}tsPlayer=null}}
-function closePlayer(){destroyPlayers();clearInterval(epgTimer);const v=$("video");v.pause();v.removeAttribute("src");v.load();$("player").hidden=true;if(isFull()){try{(document.exitFullscreen?document.exitFullscreen():document.webkitExitFullscreen()).catch(()=>{})}catch(e){}}try{screen.orientation.unlock()}catch(e){}render()}
+function closePlayer(){
+  destroyPlayers();clearInterval(epgTimer);
+  const v=$("video");try{v.pause();v.removeAttribute("src");v.load();}catch(e){}
+  $("player").hidden=true;
+  try{if(document.fullscreenElement||document.webkitFullscreenElement){(document.exitFullscreen||document.webkitExitFullscreen).call(document).catch(()=>{})}}catch(e){}
+  try{screen.orientation.unlock()}catch(e){}
+  render();
+}
 function wake(){const p=$("player");p.classList.remove("idle");clearTimeout(idleT);idleT=setTimeout(()=>p.classList.add("idle"),3500)}
 $("player").addEventListener("pointermove",wake);$("player").addEventListener("touchstart",wake,{passive:true});
 $("pPrev").onclick=()=>tune(playIndex-1);$("pNext").onclick=()=>tune(playIndex+1);$("pClose").onclick=closePlayer;
